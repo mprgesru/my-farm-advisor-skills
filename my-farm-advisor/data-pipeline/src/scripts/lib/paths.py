@@ -70,6 +70,19 @@ def grower_logs_dir(grower_slug: str) -> Path:
     return grower_dir(grower_slug) / "logs"
 
 
+def grower_derived_dir(grower_slug: str) -> Path:
+    return grower_dir(grower_slug) / "derived"
+
+
+def grower_webmaps_dir(grower_slug: str) -> Path:
+    return grower_derived_dir(grower_slug) / "webmaps"
+
+
+def grower_webmap_path(grower_slug: str, filename: str | None = None) -> Path:
+    name = filename or f"{validate_path_slug(grower_slug, 'grower_slug')}_webmap.html"
+    return grower_webmaps_dir(grower_slug) / name
+
+
 def farm_dir(grower_slug: str, farm_slug: str) -> Path:
     return ensure_data_root_path(
         grower_dir(grower_slug) / "farms" / validate_path_slug(farm_slug, "farm_slug")

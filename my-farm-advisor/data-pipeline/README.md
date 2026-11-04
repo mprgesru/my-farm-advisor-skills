@@ -24,6 +24,31 @@ cd "${DATA_PIPELINE_DATA_ROOT}/data-pipeline/src"
   --force
 ```
 
+## Grower-level interactive web map
+
+Use the `grower-webmap` workflow after the farm pipeline has generated field
+boundaries. It builds one lightweight Leaflet HTML map per grower, covering all
+farms and fields for that grower, with an Esri World Imagery basemap and
+clickable field metadata.
+
+```bash
+export DATA_PIPELINE_DATA_ROOT=/absolute/path/to/my-farm-advisor-runtime
+cd "${DATA_PIPELINE_DATA_ROOT}/data-pipeline/src"
+"${DATA_PIPELINE_DATA_ROOT}/data-pipeline/.venv/bin/python" \
+  scripts/reporting/generate_grower_webmap.py \
+  --grower-slug il-dekalb-grower \
+  --grower-slug ia-story-grower
+```
+
+Outputs are written under:
+
+```text
+${DATA_PIPELINE_DATA_ROOT}/data-pipeline/growers/<grower>/derived/webmaps/<grower>_webmap.html
+```
+
+See [grower-webmap/README.md](grower-webmap/README.md) for inputs, options, and
+validation details.
+
 For a first run that also initializes shared data and seeds fields for a grower in a state, use the installer directly from the checkout:
 
 ```bash
