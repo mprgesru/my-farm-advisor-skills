@@ -184,6 +184,34 @@ cd ../..
 ./scripts/validate.sh
 ```
 
+## Grower web map
+
+The grower-level web map is a separate reporting command, not a farm-pipeline
+step, because one map spans all farms owned by a grower. It reads the canonical
+`boundary/field_boundaries.geojson` files and writes:
+
+```text
+${DATA_PIPELINE_DATA_ROOT}/data-pipeline/growers/<grower>/derived/webmaps/<grower>_webmap.html
+${DATA_PIPELINE_DATA_ROOT}/data-pipeline/growers/<grower>/manifests/grower_webmap.json
+```
+
+Install the generator into the runtime source copy, then run it for the desired
+growers:
+
+```bash
+export DATA_PIPELINE_DATA_ROOT=/absolute/path/to/my-farm-advisor-runtime
+cd "${DATA_PIPELINE_DATA_ROOT}/data-pipeline/src"
+"${DATA_PIPELINE_DATA_ROOT}/data-pipeline/.venv/bin/python" \
+  scripts/reporting/generate_grower_webmap.py \
+  --grower-slug il-dekalb-grower \
+  --grower-slug ia-story-grower
+```
+
+Use `--all-growers` to render every grower with fields and `--dry-run` to
+preview outputs without writing. Do not embed raster imagery or base64 data in
+the HTML. See [grower-webmap/AGENTS.md](grower-webmap/AGENTS.md) for the full
+contract.
+
 ## Local workflow notes
 
 - Keep this skill tiny and operational: copy baseline files from `src/` into live storage, preserve live data across reboot or redeploy, and use auditable `rsync` commands.
