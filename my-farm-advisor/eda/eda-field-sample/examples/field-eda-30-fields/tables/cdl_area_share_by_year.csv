@@ -1,0 +1,16 @@
+grower,state,year,corn_pct,soybeans_pct,other_crop_pct,non-crop_pct,corn_to_corn,corn_to_soy
+ia-story-grower,IA,2021,47.44,51.1,0.0,1.46,0.235,0.765
+ia-story-grower,IA,2022,51.13,47.01,0.0,1.86,0.235,0.765
+ia-story-grower,IA,2023,53.03,44.9,0.02,2.05,0.235,0.765
+ia-story-grower,IA,2024,48.43,49.44,0.0,2.13,0.235,0.765
+ia-story-grower,IA,2025,58.69,38.95,0.06,2.29,0.235,0.765
+il-dekalb-grower,IL,2021,60.88,38.26,0.0,0.87,0.19,0.81
+il-dekalb-grower,IL,2022,50.43,48.92,0.06,0.59,0.19,0.81
+il-dekalb-grower,IL,2023,65.29,34.13,0.1,0.48,0.19,0.81
+il-dekalb-grower,IL,2024,61.23,37.55,0.0,1.22,0.19,0.81
+il-dekalb-grower,IL,2025,67.63,30.89,0.0,1.48,0.19,0.81
+ne-york-grower,NE,2021,88.74,11.13,0.06,0.07,0.742,0.258
+ne-york-grower,NE,2022,40.13,59.72,0.03,0.12,0.742,0.258
+ne-york-grower,NE,2023,88.56,11.29,0.0,0.15,0.742,0.258
+ne-york-grower,NE,2024,90.74,8.8,0.0,0.46,0.742,0.258
+ne-york-grower,NE,2025,99.64,0.08,0.0,0.28,0.742,0.258

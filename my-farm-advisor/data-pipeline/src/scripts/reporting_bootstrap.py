@@ -406,18 +406,33 @@ def ensure_canonical_data_tree(
     (farm / "derived" / "summaries").mkdir(parents=True, exist_ok=True)
     (farm / "derived" / "dashboards").mkdir(parents=True, exist_ok=True)
     (farm / "derived" / "tables").mkdir(parents=True, exist_ok=True)
-    _write_json(
-        farm / "farm.json",
-        {
-            "grower_slug": grower_slug,
-            "farm_slug": farm_slug,
-            "display_name": farm_name,
-            "state": "IA",
-            "country": "US",
-            "default_crs": "EPSG:4326",
-            "notes": "Canonical farm metadata",
-        },
+    farm_json_path = farm / "farm.json"
+    existing_farm_json: dict = {}
+    if farm_json_path.exists():
+        try:
+            loaded = json.loads(farm_json_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                existing_farm_json = loaded
+        except (ValueError, OSError):
+            existing_farm_json = {}
+    farm_payload = {
+        "grower_slug": grower_slug,
+        "farm_slug": farm_slug,
+        "display_name": farm_name,
+        "state": "IA",
+        "country": "US",
+        "default_crs": "EPSG:4326",
+        "notes": "Canonical farm metadata",
+    }
+    # On-disk metadata wins: a re-run must not relabel a Nebraska farm as Iowa.
+    farm_payload.update(
+        {k: v for k, v in existing_farm_json.items() if v is not None}
     )
+    # Step scripts call this without --farm-name, so the placeholder must not
+    # overwrite the name the operator set.
+    if farm_name in ("", "Default Farm") and existing_farm_json.get("display_name"):
+        farm_payload["display_name"] = existing_farm_json["display_name"]
+    _write_json(farm_json_path, farm_payload)
     _write_text(farm / "logs" / "pipeline_runs.jsonl", "", overwrite=False)
 
     slugs = field_slugs_from_inventory(inventory_path=inventory_path)

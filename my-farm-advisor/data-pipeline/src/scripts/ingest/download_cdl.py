@@ -49,6 +49,17 @@ def _cdl_raster_path(year: int, *, conus: bool, state_fips: str | None = None) -
     return shared_cdl_state_raster_path(year, str(state_fips or "19"))
 
 
+def _validate_cdl_raster(path: Path) -> None:
+    """Fail loudly on a truncated transfer before the file is cached."""
+    import rasterio
+
+    with rasterio.open(path) as src:
+        if src.width <= 0 or src.height <= 0:
+            raise ValueError(f"empty raster: {path}")
+        # The last block is the first thing a truncated stream loses.
+        src.read(1, window=((src.height - 1, src.height), (src.width - 1, src.width)))
+
+
 def _download_cdl_raster(
     year: int,
     *,
@@ -57,6 +68,8 @@ def _download_cdl_raster(
     force: bool = False,
 ) -> Path:
     """Download one shared CDL raster and return its canonical runtime path."""
+    from requests.exceptions import ChunkedEncodingError
+
     label = _cdl_coverage_label(conus=conus, state_fips=state_fips)
     cdl_path = _cdl_raster_path(year, conus=conus, state_fips=state_fips)
     if cdl_path.exists() and not force:
@@ -65,15 +78,35 @@ def _download_cdl_raster(
 
     cdl_path.parent.mkdir(parents=True, exist_ok=True)
     url = f"https://nassgeodata.gmu.edu/nass_data_cache/byfips/CDL_{year}_{label}.tif"
-    print(f"  Downloading CDL {year} {label}...")
-    with requests.get(url, stream=True, timeout=180) as resp:
-        resp.raise_for_status()
-        with open(cdl_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    f.write(chunk)
-    print(f"  Downloaded CDL {year} {label}: {cdl_path}")
-    return cdl_path
+    tmp_path = cdl_path.with_name(cdl_path.name + ".part")
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        print(f"  Downloading CDL {year} {label} (attempt {attempt}/3)...")
+        try:
+            with requests.get(url, stream=True, timeout=180) as resp:
+                resp.raise_for_status()
+                with open(tmp_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+            _validate_cdl_raster(tmp_path)
+            tmp_path.replace(cdl_path)
+        except HTTPError:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        except (ChunkedEncodingError, OSError, ValueError) as exc:
+            last_error = exc
+            tmp_path.unlink(missing_ok=True)
+            print(
+                f"  Warning: CDL {year} {label} transfer failed "
+                f"({type(exc).__name__}); retrying"
+            )
+            continue
+        print(f"  Downloaded CDL {year} {label}: {cdl_path}")
+        return cdl_path
+    raise RuntimeError(
+        f"CDL {year} {label} download failed after 3 attempts"
+    ) from last_error
 
 
 def download_cdl(year, state_fips="19"):
@@ -170,7 +203,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cdl-years",
         default=None,
-        help="Comma-separated explicit CDL years. Overrides latest/window fallback.",
+        help=(
+            "Comma-separated explicit CDL years. Overrides latest/window fallback. "
+            "Applies to both --raster-only and the farm composition step."
+        ),
     )
     parser.add_argument(
         "--cdl-latest-year",
@@ -195,6 +231,11 @@ def _state_fips_values(fields: gpd.GeoDataFrame) -> list[str]:
         pd.Series(fields["state_fips"], dtype="object").fillna("").astype(str).str.strip().tolist()
     )
     unique_values = sorted({value.zfill(2) for value in values if value})
+    if not unique_values:
+        print(
+            "  Warning: field boundaries carry no state_fips; falling back to "
+            "['19'] (Iowa). CDL extraction may read the wrong state raster."
+        )
     return unique_values or ["19"]
 
 
@@ -259,7 +300,7 @@ def main():
     if not us_fields.empty:
         print("State CDL coverage:", ", ".join(state_fips_values))
 
-    target_years = _target_cdl_years()
+    target_years = _parse_years(args.cdl_years) or _target_cdl_years()
     cached_years = [
         year
         for year in target_years

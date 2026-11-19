@@ -23,6 +23,7 @@ _LIB = _RUNTIME_PATHS.runtime_scripts / "lib"
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_LIB))
 
+from optional_inputs import read_optional_csv  # noqa: E402
 from reporting_bootstrap import ensure_skill_path  # noqa: E402
 
 
@@ -194,7 +195,9 @@ def main() -> None:
         return
 
     fields = gpd.read_file(_REPO / config.field_boundary_path)
-    soil_summary = pd.read_csv(farm_ssurgo_summary_path(_DEFAULT_GROWER, _DEFAULT_FARM))
+    soil_summary = read_optional_csv(
+        farm_ssurgo_summary_path(_DEFAULT_GROWER, _DEFAULT_FARM)
+    )
     weather = pd.read_csv(
         farm_weather_path(_DEFAULT_GROWER, _DEFAULT_FARM),
         parse_dates=["date"],
