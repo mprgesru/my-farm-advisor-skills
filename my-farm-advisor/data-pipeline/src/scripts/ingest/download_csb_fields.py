@@ -22,6 +22,13 @@ Usage:
   export DATA_PIPELINE_DATA_ROOT=... AG_GROWER_SLUG=... AG_FARM_SLUG=...
   python download_csb_fields.py --bbox S W N E --min-area-ha 40 \
       --field-prefix ia-r --max-fields 3
+
+Expanding an existing farm (append mode): pass `--exclude-existing` so
+candidates that overlap fields already on disk are dropped instead of being
+re-added under a new `field_id` (the same ground counted twice). Pass
+`--state-fips` so new boundaries carry the `state_fips`/`county_fips`
+properties that `download_cdl.py` uses to pick its state raster — without it
+the CDL leg falls back to Iowa (FIPS 19).
 """
 from __future__ import annotations
 
@@ -34,7 +41,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-from paths import DATA_ROOT  # pyright: ignore[reportMissingImports]
+from paths import (  # pyright: ignore[reportMissingImports]
+    DATA_ROOT,
+    shared_geoadmin_counties_dir,
+)
 
 import fsspec  # pyright: ignore[reportMissingImports]
 import geopandas as gpd  # pyright: ignore[reportMissingImports]
@@ -68,6 +78,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--country", default="US")
     ap.add_argument("--state", default="")
     ap.add_argument("--year", default="")
+    ap.add_argument(
+        "--state-fips",
+        default="",
+        help="Two-digit state FIPS written into each new boundary (e.g. 31 for Nebraska)",
+    )
+    ap.add_argument(
+        "--exclude-existing",
+        action="store_true",
+        help="Skip candidates overlapping existing farm fields by more than 5%%",
+    )
     args = ap.parse_args(argv)
 
     grower = os.environ.get("AG_GROWER_SLUG") or sys.exit("AG_GROWER_SLUG required")
@@ -86,6 +106,13 @@ def main(argv: list[str] | None = None) -> int:
     xmin, xmax = sorted((x0, x1))
     ymin, ymax = sorted((y0, y1))
 
+    farm_bounds = farm_dir / "boundary" / "field_boundaries.geojson"
+    existing_polys: list = []
+    if args.exclude_existing and farm_bounds.exists():
+        existing = gpd.read_file(farm_bounds).to_crs(crs)
+        existing_polys = [g for g in existing.geometry if g is not None]
+        print(f"exclude-existing: {len(existing_polys)} field polygons already on file")
+
     sel = []
     for i in range(pf.metadata.num_row_groups):
         st = pf.metadata.row_group(i)
@@ -101,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
             sel.append(i)
 
     rows = []
+    skipped_overlap = 0
     for i in sel:
         d = pf.read_row_group(
             i, columns=["id", "crop:name", "administrative_area_level_2", "geometry"]
@@ -115,7 +143,17 @@ def main(argv: list[str] | None = None) -> int:
             if bb[2] > xmin and bb[0] < xmax and bb[3] > ymin and bb[1] < ymax:
                 ha = poly.area / 10000.0  # projected CRS is equal-area
                 if ha >= args.min_area_ha:
+                    if existing_polys:
+                        overlap = max(
+                            poly.intersection(existing).area / poly.area
+                            for existing in existing_polys
+                        )
+                        if overlap > 0.05:
+                            skipped_overlap += 1
+                            continue
                     rows.append((fid, crop, county, ha, poly))
+    if skipped_overlap:
+        print(f"exclude-existing: skipped {skipped_overlap} overlapping candidates")
     rows.sort(key=lambda r: (-r[3], str(r[0])))
     rows = rows[: args.max_fields]
     if not rows:
@@ -124,11 +162,49 @@ def main(argv: list[str] | None = None) -> int:
 
     inv_rows = []
     merged = None
-    farm_bounds = farm_dir / "boundary" / "field_boundaries.geojson"
+    fips_by_field: dict[str, tuple[str, str]] = {}
+    if args.state_fips:
+        counties_path = shared_geoadmin_counties_dir() / "counties_usa.parquet"
+        if counties_path.exists():
+            frame = pd.read_parquet(counties_path)
+            geoms = frame["geometry"]
+            if len(frame) and isinstance(geoms.iloc[0], (bytes, bytearray)):
+                geoms = gpd.GeoSeries.from_wkb(geoms)
+            counties = gpd.GeoDataFrame(frame, geometry=geoms, crs="EPSG:4326")
+            state_fips = args.state_fips.zfill(2)
+            counties = counties[
+                counties["state_fips"].astype(str).str.zfill(2) == state_fips
+            ]
+            points = gpd.GeoDataFrame(
+                {"csb_id": [str(row[0]) for row in rows]},
+                geometry=gpd.GeoSeries(
+                    [row[4].centroid for row in rows], crs=crs
+                ).to_crs("EPSG:4326"),
+                crs="EPSG:4326",
+            )
+            joined = gpd.sjoin(
+                points,
+                counties[["county_fips", "county_name", "geometry"]],
+                how="left",
+                predicate="within",
+            )
+            for _, match in joined.iterrows():
+                county_fips = match.get("county_fips")
+                county_label = match.get("county_name")
+                fips_by_field[str(match["csb_id"])] = (
+                    "" if pd.isna(county_fips) else str(county_fips).zfill(3),
+                    "" if pd.isna(county_label) else str(county_label),
+                )
+        else:
+            print(
+                f"  Warning: county lookup unavailable at {counties_path}; "
+                "county_fips left blank"
+            )
     for i, (fid, crop, county, ha, poly) in enumerate(rows):
         slug = f"{args.field_prefix}{i + 1}"
         fdir = farm_dir / "fields" / slug
         (fdir / "boundary").mkdir(parents=True, exist_ok=True)
+        county_fips, county_name = fips_by_field.get(str(fid), ("", ""))
         gdf = gpd.GeoDataFrame(
             [
                 {
@@ -142,6 +218,9 @@ def main(argv: list[str] | None = None) -> int:
                     "source": "usda_csb_fiboa",
                     "csb_id": str(fid),
                     "county": county,
+                    "state_fips": args.state_fips.zfill(2) if args.state_fips else "",
+                    "county_fips": county_fips,
+                    "county_name": county_name or county,
                     "geometry": poly,
                 }
             ],
